@@ -1,0 +1,247 @@
+import os
+configfile: "config.yaml"
+
+OUT=config["output_dir"]
+IN=config["input_dir"]
+DATAIN=os.path.join(config["input_dir"], "data")
+SAMPLES = [x.split('/')[0] for x in config['samples']]
+IDS = [x.split('/')[-1] for x in config['samples']]
+ref_index = [f"{DATAIN}/reference/combo_genome.{x}.ht2" for x in range(1,9)]
+
+rule all:
+    input:
+        # pre-trim FastQC (R1/R2)
+        expand(f"{OUT}/fastqc/pretrim/{{id}}_1_fastqc.html", zip, sample=SAMPLES, id=IDS),
+        expand(f"{OUT}/fastqc/pretrim/{{id}}_2_fastqc.html", zip, sample=SAMPLES, id=IDS),
+        # post-trim FastQC (R1/R2)
+        expand(f"{OUT}/fastqc/posttrim/{{id}}_1.trim_fastqc.html", zip, sample=SAMPLES, id=IDS),
+        expand(f"{OUT}/fastqc/posttrim/{{id}}_2.trim_fastqc.html", zip, sample=SAMPLES, id=IDS),
+        # reference & alignment
+        f"{DATAIN}/reference/combo_genome.fa",
+        expand(f"{OUT}/align/{{sample}}/{{id}}.bam.bai", zip, sample=SAMPLES, id=IDS),
+        # post-alignment QC report
+        expand(f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimapReport", zip, sample=SAMPLES, id=IDS),
+        # single MultiQC
+        f"{OUT}/multiqc/final_multiqc_report.html"
+        
+rule fastqc_pretrim:
+    input:
+        read1 = lambda wc: f"{DATAIN}/{wc.sample}/{wc.id}_1.fastq.gz",
+        read2 = lambda wc: f"{DATAIN}/{wc.sample}/{wc.id}_2.fastq.gz"
+    output:
+        out1 = f"{OUT}/fastqc/{{sample}}/{{id}}_1_fastqc.html",
+        out2 = f"{OUT}/fastqc/{{sample}}/{{id}}_2_fastqc.html"
+    params:
+        outdir= f"{OUT}/fastqc/pretrim"
+    shell:
+        """
+        mkdir -p {params.outdir}
+        fastqc --outdir="{params.outdir}" {input.read1} {input.read2}
+        """
+        
+rule fastp:
+    input: 
+        read1 = lambda wc: f"{DATAIN}/{wc.sample}/{wc.id}_1.fastq.gz",
+        read2 = lambda wc: f"{DATAIN}/{wc.sample}/{wc.id}_2.fastq.gz"
+    output:
+        out1=f"{OUT}/fastp/{{sample}}/{{id}}_1.trim.fastq.gz",
+        out2=f"{OUT}/fastp/{{sample}}/{{id}}_2.trim.fastq.gz",
+        html=f"{OUT}/fastp/{{sample}}/{{id}}_fastp.html",
+        json=f"{OUT}/fastp/{{sample}}/{{id}}_fastp.json"
+    params:
+        outdir = lambda wc: f"{OUT}/fastp/{wc.sample}"
+    shell:
+        """
+        OUTPUT_DIR="{params.outdir}"
+        IN1="{input.read1}"
+        IN2="{input.read2}"
+        OUT1="{output.out1}"
+        OUT2="{output.out2}"
+        HTML="{output.html}"
+        JSON="{output.json}"
+        # Create output directory if it doesn't exist
+        mkdir -p "$OUTPUT_DIR"
+
+        fastp \
+          -i $IN1 -I $IN2 \
+          -o $OUT1 -O $OUT2 \
+          --detect_adapter_for_pe \
+          --trim_front1 0 --trim_front2 0 \
+          --cut_front --cut_tail --cut_window_size 4 --cut_mean_quality 15 \
+          --length_required 36 \
+          --thread 4 \
+          --html $HTML --json $JSON
+        """
+
+rule fastqc_posttrim:
+    input:
+        read1=rules.fastp.output.out1,
+        read2=rules.fastp.output.out2
+    output:
+        out1 = f"{OUT}/fastqc/{{sample}}/{{id}}_1.trim_fastqc.html",
+        out2 = f"{OUT}/fastqc/{{sample}}/{{id}}_2.trim_fastqc.html"
+    params:
+        outdir = f"{OUT}/fastqc/posttrim"
+    shell:
+        """
+        mkdir -p {params.outdir}
+        fastqc --outdir="{params.outdir}" {input.read1} {input.read2}
+        """
+        
+rule check_for_herpes_ref:
+    output:
+        f"{DATAIN}/reference/Herpesvirus_1_strain_KOS.fasta"
+    params:
+        inputdir=IN,
+        outputdir=f"{DATAIN}/reference",
+        email=config["email"]
+    shell:
+        """
+        mkdir -p {params.outputdir}
+        cd {params.inputdir}/data_management/reference_genome/
+
+        python pull_herpes_fasta.py {params.email} {params.outputdir}
+        """
+rule check_for_grch37_ref:
+    output:
+        f"{DATAIN}/grch37/genome.fa"
+    params:
+        outputdir=f"{DATAIN}/reference"
+    shell:
+        """
+        mkdir -p {params.outputdir}
+        cd src/data_management/reference_genome/
+        
+        bash download_ref.sh
+        """
+        
+rule combine_fasta:
+    input:
+        human_ref=rules.check_for_grch37_ref.output,
+        herpes_ref=rules.check_for_herpes_ref.output
+    output:
+        f"{DATAIN}/reference/combo_genome.fa"
+    params:
+        outdir=f"{DATAIN}/reference"
+    shell:
+        """
+        cd {params.outdir}
+
+        echo "" >> {input.human_ref} 
+        mv {input.human_ref} {output}
+        
+        cat {output[0]} {input.herpes_ref} 
+        """
+rule build_ref_index:
+    input:
+        rules.combine_fasta.output
+    output:
+        expand(f"{DATAIN}/reference/combo_genome.{{sub}}.ht2",sub=range(1,9))
+    run:
+        import glob
+        # check existing files
+        current_files = glob.glob(f"{DATAIN}/reference/combo_genome.*.ht2")
+        
+        if set(current_files) != set(ref_index):
+            shell(f"cd {DATAIN}/reference && hisat2-build {input} combo_genome")
+            
+rule align_reads:
+    input:
+        r1=rules.fastp.output.out1,
+        r2=rules.fastp.output.out2,
+        genome=expand(f"{DATAIN}/reference/combo_genome.{{sub}}.ht2",sub=range(1,9))
+    output:
+        f"{OUT}/align/{{sample}}/{{id}}.SAM.gz"
+    params:
+        index_dir=f"{DATAIN}/reference/combo_genome",
+        outdir=f"{OUT}/align/{{sample}}",
+        outfile=f"{OUT}/align/{{sample}}/{{id}}.SAM"
+    threads:
+        2
+    shell:
+        """
+        mkdir -p {params.outdir}
+        
+        hisat2 -x {params.index_dir} -1 {input.r1} -2 {input.r2} -S {params.outfile}
+        
+        cd {params.outdir}
+        pigz -p {threads} {params.outfile}
+        """
+rule align_sort:
+    input:
+        sam_file=rules.align_reads.output
+    output:
+         f"{OUT}/align/{{sample}}/{{id}}.bam"
+    shell:
+        """
+        samtools sort -o {output[0]} {input.sam_file}
+        """
+rule align_index:
+    input:
+        bam_file=rules.align_sort.output
+    output:
+        f"{OUT}/align/{{sample}}/{{id}}.bam.bai"
+    shell:
+        """
+        samtools index -b {input.bam_file} {output[0]}
+        """
+
+rule qualimap_postalign:
+    input:
+        bam_file = rules.align_sort.output
+    output:
+        directory(f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimapReport")
+    params:
+        tmpout = f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimap",
+        outdir = f"{OUT}/fastqc/postalign",
+        outfile_base = f"{{sample}}_{{id}}_qualimap",
+        finalhtml=f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimapReport.html",
+        rawdatadir = f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimap/raw_data_qualimapReport",
+        finalrawdata = f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimapReport",
+        rawgenome = f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimap/genome_results.txt",
+        finalgenome= f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_genome_results.txt"
+    threads:
+        2
+    shell:
+        """
+        mkdir -p {params.tmpout}
+        mkdir -p {params.outdir}
+        
+        # Run qualimap in HTML format to get raw data
+        qualimap bamqc -nt {threads} \
+        -bam {input.bam_file} \
+        -outdir {params.tmpout} \
+        -outfile {params.outfile_base} \
+        -outformat html
+        
+        # cd into result folder
+        cd {params.tmpout}
+        # move & rename html output + rawdata folder
+        mv qualimapReport.html {params.finalhtml}
+        mv {params.rawdatadir} {params.finalrawdata}
+        mv {params.rawgenome} {params.finalgenome}
+        
+        # remove old directory
+        rm -r {params.tmpout}
+        """
+        
+rule multiqc:
+    input: 
+        pretrim=f"{OUT}/fastqc/pretrim", 
+        posttrim=f"{OUT}/fastqc/posttrim", 
+        # Explicitly list all qualimap directories as dependencies
+        postalign_dirs = expand(f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimap", 
+                               zip, sample=SAMPLES, id=IDS) 
+    output: 
+        out=f"{OUT}/multiqc/final_multiqc_report.html"
+    params: 
+        outdir=f"{OUT}/multiqc",
+        outhtml=f"{OUT}/multiqc/final_multiqc_report" 
+    shell: 
+        """
+        mkdir -p {params.outdir}
+        multiqc -n {params.outhtml} \
+        {input.pretrim} \
+        {input.posttrim} \
+        {input.postalign_dirs}
+        """
