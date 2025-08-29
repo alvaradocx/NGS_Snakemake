@@ -20,7 +20,7 @@ This pipeline performs RNA-seq analysis including:
 ### Virtual Environment
 ```bash
 conda env create -f environment.yaml
-conda activate rnaseq-pipeline
+conda activate snakemake-pipeline
 ```
 
 ## Configuration
