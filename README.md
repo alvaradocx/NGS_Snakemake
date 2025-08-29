@@ -117,9 +117,9 @@ If you use this pipeline, please cite the original study:
 [Herpes Simplex Virus 1 Infection of Human Brain Organoids...](https://pmc.ncbi.nlm.nih.gov/articles/PMC11640215/)
 
 ## License
-
-[Specify your license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contact
 
-[Your contact information]
+Chelsea Alvarado
+alvaradocx4@gmail.com
