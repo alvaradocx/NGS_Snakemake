@@ -1,0 +1,35 @@
+# Define a list of samples (format: SRA_ID/SAMPLE_ID)
+samples:
+    - SRR29848598/A3I
+    - SRR29848599/A2I
+    - SRR29848600/A1I
+    - SRR29848601/H3I
+    - SRR29848602/H2I
+    - SRR29848603/H1I
+    - SRR29848605/U3I
+    - SRR29848605/U2I
+    - SRR29848606/U1I
+
+# Reference genome build (grch37 or grch38)
+build: "grch38"
+
+# Define input and output directories (modify these paths for your system)
+input_dir: "src"
+data_input_dir: "src/data"
+output_dir: "out/data"
+reference_dir: "src/data/reference"
+
+# User email for NCBI API calls (required for downloading references)
+email: "your.email@example.com"
+
+# Path to herpes gtf file (download from NCBI as mentioned in README)
+herpes_gtf: "src/data/reference/herpesKOS_genomic.gtf"
+
+# HTSeq counting parameters
+stranded: "no"           # Library strandedness: "yes", "no", or "reverse"
+feature_type: "exon"     # Feature type to count
+id_attribute: "gene_id"  # GTF attribute for gene identification
+
+# Differential expression thresholds (optional)
+padj_threshold: 0.05     # Adjusted p-value cutoff
+lfc_threshold: 1.0       # Log2 fold change threshold
