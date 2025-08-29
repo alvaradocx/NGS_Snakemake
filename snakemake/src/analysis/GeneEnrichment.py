@@ -179,7 +179,7 @@ def create_enrichment_plots(go_results_all, kegg_results_all, plots_dir):
             plt.colorbar(scatter, ax=axes[1, 1], label='-Log10(Adjusted P-value)')
     
     plt.tight_layout()
-    plt.savefig(plots_dir / 'enrichment_plots.pdf', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{plots_dir}/enrichment_plots.pdf', bbox_inches='tight', dpi=300)
     plt.close()
 
 def main():
@@ -188,7 +188,7 @@ def main():
     # Create output directories
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    plots_dir = outdir / 'plots'
+    plots_dir = f'{outdir}/plots'
     plots_dir.mkdir(parents=True, exist_ok=True)
     
     # Load gene lists

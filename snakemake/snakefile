@@ -6,50 +6,76 @@ IN=config["input_dir"]
 DATAIN=os.path.join(config["input_dir"], "data")
 SAMPLES = [x.split('/')[0] for x in config['samples']]
 IDS = [x.split('/')[-1] for x in config['samples']]
-ref_index = [f"{DATAIN}/reference/combo_genome.{x}.ht2" for x in range(1,9)]
+SAMPLE_GROUP = {"A1I":"HSV-1-infected_and_ACV_treated_islets","A2I":"HSV-1-infected_and_ACV_treated_islets", "H1I":"HSV-1-infected_islets","H2I":"HSV-1-infected_islets", "U1I":"Uninfected_islets", "U2I": "Uninfected_islets"}
+SAMPLE_DICT = dict(zip(SAMPLES,IDS))
+# Create the paired sample_id combinations first
+sample_id_pairs = [f"{sample}_{id}" for sample, id in zip(SAMPLES, IDS)]
+# Get genome build from config (with default)
+GENOME_BUILD = config["build"].lower()
 
+# Validate genome build
+if GENOME_BUILD not in ["grch37", "grch38"]:
+    raise ValueError(f"Invalid genome_build: {GENOME_BUILD}. Must be 'grch37' or 'grch38'")
+    
+# Set paths based on genome build
+GENOME_FA = f"{DATAIN}/reference/{GENOME_BUILD}_genome.fa"
 rule all:
     input:
-        # pre-trim FastQC (R1/R2)
-        expand(f"{OUT}/fastqc/pretrim/{{id}}_1_fastqc.html", zip, sample=SAMPLES, id=IDS),
-        expand(f"{OUT}/fastqc/pretrim/{{id}}_2_fastqc.html", zip, sample=SAMPLES, id=IDS),
-        # post-trim FastQC (R1/R2)
-        expand(f"{OUT}/fastqc/posttrim/{{id}}_1.trim_fastqc.html", zip, sample=SAMPLES, id=IDS),
-        expand(f"{OUT}/fastqc/posttrim/{{id}}_2.trim_fastqc.html", zip, sample=SAMPLES, id=IDS),
-        # reference & alignment
-        f"{DATAIN}/reference/combo_genome.fa",
-        expand(f"{OUT}/align/{{sample}}/{{id}}.bam.bai", zip, sample=SAMPLES, id=IDS),
-        # post-alignment QC report
-        expand(f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimapReport", zip, sample=SAMPLES, id=IDS),
         # single MultiQC
-        f"{OUT}/multiqc/final_multiqc_report.html"
+        f"{OUT}/multiqc/final_multiqc_report.html",
+        
+        # analysis
+        f"{OUT}/pydeseq2/differential_expression_results.csv",
+        f"{OUT}/pydeseq2/plots/pca_plot.pdf",
+        f"{OUT}/pydeseq2/plots/volcano_plot.pdf",
+        f"{OUT}/pydeseq2/pydeseq2_summary.txt"
         
 rule fastqc_pretrim:
     input:
-        read1 = lambda wc: f"{DATAIN}/{wc.sample}/{wc.id}_1.fastq.gz",
-        read2 = lambda wc: f"{DATAIN}/{wc.sample}/{wc.id}_2.fastq.gz"
+        read1 = f"{DATAIN}/{{sample}}/{{id}}_1.fastq.gz",
+        read2 = f"{DATAIN}/{{sample}}/{{id}}_2.fastq.gz"
     output:
-        out1 = f"{OUT}/fastqc/{{sample}}/{{id}}_1_fastqc.html",
-        out2 = f"{OUT}/fastqc/{{sample}}/{{id}}_2_fastqc.html"
+        out1 = f"{OUT}/fastqc/pretrim/{{sample}}_{{id}}_1_fastqc.html",
+        out2 = f"{OUT}/fastqc/pretrim/{{sample}}_{{id}}_2_fastqc.html"
     params:
-        outdir= f"{OUT}/fastqc/pretrim"
+        outdir= f"{OUT}/fastqc/pretrim",
+        tmpfile1 = f"{{id}}_1_fastqc.html",
+        tmpfile2 = f"{{id}}_2_fastqc.html",
+        tmpzip1 = f"{{id}}_1_fastqc.zip",
+        tmpzip2 = f"{{id}}_2_fastqc.zip",
+        finalout1 = f"{{sample}}_{{id}}_1_fastqc.html",
+        finalout2 = f"{{sample}}_{{id}}_2_fastqc.html",
+        finalzip1 = f"{{sample}}_{{id}}_1_fastqc.zip",
+        finalzip2 = f"{{sample}}_{{id}}_2_fastqc.zip"
     shell:
         """
         mkdir -p {params.outdir}
         fastqc --outdir="{params.outdir}" {input.read1} {input.read2}
+        
+        # move into output directory
+        cd {params.outdir}
+        
+        # rename outputs
+        mv {params.tmpfile1} {params.finalout1}
+        mv {params.tmpfile2} {params.finalout2}
+        
+        mv {params.tmpzip1} {params.finalzip1}
+        mv {params.tmpzip2} {params.finalzip2}
         """
         
 rule fastp:
     input: 
-        read1 = lambda wc: f"{DATAIN}/{wc.sample}/{wc.id}_1.fastq.gz",
-        read2 = lambda wc: f"{DATAIN}/{wc.sample}/{wc.id}_2.fastq.gz"
+        read1 = f"{DATAIN}/{{sample}}/{{id}}_1.fastq.gz",
+        read2 = f"{DATAIN}/{{sample}}/{{id}}_2.fastq.gz"
     output:
-        out1=f"{OUT}/fastp/{{sample}}/{{id}}_1.trim.fastq.gz",
-        out2=f"{OUT}/fastp/{{sample}}/{{id}}_2.trim.fastq.gz",
-        html=f"{OUT}/fastp/{{sample}}/{{id}}_fastp.html",
-        json=f"{OUT}/fastp/{{sample}}/{{id}}_fastp.json"
+        out1=f"{OUT}/fastp/{{sample}}_{{id}}_1.trim.fastq.gz",
+        out2=f"{OUT}/fastp/{{sample}}_{{id}}_2.trim.fastq.gz",
+        html=f"{OUT}/fastp/{{sample}}_{{id}}_fastp.html",
+        json=f"{OUT}/fastp/{{sample}}_{{id}}_fastp.json"
+    threads:
+        3
     params:
-        outdir = lambda wc: f"{OUT}/fastp/{wc.sample}"
+        outdir = f"{OUT}/fastp"
     shell:
         """
         OUTPUT_DIR="{params.outdir}"
@@ -69,17 +95,17 @@ rule fastp:
           --trim_front1 0 --trim_front2 0 \
           --cut_front --cut_tail --cut_window_size 4 --cut_mean_quality 15 \
           --length_required 36 \
-          --thread 4 \
+          --thread {threads} \
           --html $HTML --json $JSON
         """
 
 rule fastqc_posttrim:
     input:
-        read1=rules.fastp.output.out1,
-        read2=rules.fastp.output.out2
+        read1=f"{OUT}/fastp/{{sample_id}}_1.trim.fastq.gz",
+        read2=f"{OUT}/fastp/{{sample_id}}_2.trim.fastq.gz"
     output:
-        out1 = f"{OUT}/fastqc/{{sample}}/{{id}}_1.trim_fastqc.html",
-        out2 = f"{OUT}/fastqc/{{sample}}/{{id}}_2.trim_fastqc.html"
+        out1 = f"{OUT}/fastqc/posttrim/{{sample_id}}_1.trim_fastqc.html",
+        out2 = f"{OUT}/fastqc/posttrim/{{sample_id}}_2.trim_fastqc.html"
     params:
         outdir = f"{OUT}/fastqc/posttrim"
     shell:
@@ -102,9 +128,10 @@ rule check_for_herpes_ref:
 
         python pull_herpes_fasta.py {params.email} {params.outputdir}
         """
-rule check_for_grch37_ref:
+        
+rule download_grch37_ref:
     output:
-        f"{DATAIN}/grch37/genome.fa"
+        f"{DATAIN}/reference/grch37_genome.fa"
     params:
         outputdir=f"{DATAIN}/reference"
     shell:
@@ -112,96 +139,107 @@ rule check_for_grch37_ref:
         mkdir -p {params.outputdir}
         cd src/data_management/reference_genome/
         
-        bash download_ref.sh
+        bash download_ref37.sh
         """
         
+rule download_grch38_ref:
+    output:
+        f"{DATAIN}/reference/grch38_genome.fa"
+    params:
+        outputdir=f"{DATAIN}/reference"
+    shell:
+        """
+        mkdir -p {params.outputdir}
+        cd src/data_management/reference_genome/
+        
+        bash download_ref38.sh
+        """
+
+# Dynamic rule to select the correct genome
+rule get_selected_genome:
+    input:
+        lambda wildcards: f"{DATAIN}/reference/{GENOME_BUILD}/genome.fa"
+    output:
+        GENOME_FA
+    shell:
+        """
+        # Create symbolic link or copy the selected genome
+        ln -sf $(realpath {input}) {output} || cp {input} {output}
+        """
+ 
 rule combine_fasta:
     input:
-        human_ref=rules.check_for_grch37_ref.output,
+        human_ref=GENOME_FA,
         herpes_ref=rules.check_for_herpes_ref.output
     output:
-        f"{DATAIN}/reference/combo_genome.fa"
+        f"{DATAIN}/reference/combo_genome_{GENOME_BUILD}.fa"
     params:
         outdir=f"{DATAIN}/reference"
     shell:
         """
         cd {params.outdir}
-
-        echo "" >> {input.human_ref} 
-        mv {input.human_ref} {output}
         
-        cat {output[0]} {input.herpes_ref} 
+        cat {input.human_ref} {input.herpes_ref} > {output}
         """
+
 rule build_ref_index:
     input:
         rules.combine_fasta.output
     output:
-        expand(f"{DATAIN}/reference/combo_genome.{{sub}}.ht2",sub=range(1,9))
+        expand(f"{DATAIN}/reference/combo_genome_{GENOME_BUILD}.{{sub}}.ht2", sub=range(1,9))
+    params:
+        build=GENOME_BUILD
     run:
         import glob
         # check existing files
-        current_files = glob.glob(f"{DATAIN}/reference/combo_genome.*.ht2")
+        expected_files = [f"{DATAIN}/reference/combo_genome_{GENOME_BUILD}.{x}.ht2" for x in range(1,9)]
+        current_files = glob.glob(f"{DATAIN}/reference/combo_genome_{GENOME_BUILD}.*.ht2")
         
-        if set(current_files) != set(ref_index):
-            shell(f"cd {DATAIN}/reference && hisat2-build {input} combo_genome")
+        if set(current_files) != set(expected_files):
+            shell(f"cd {DATAIN}/reference && hisat2-build {input} combo_genome_{GENOME_BUILD}")
             
 rule align_reads:
     input:
-        r1=rules.fastp.output.out1,
-        r2=rules.fastp.output.out2,
-        genome=expand(f"{DATAIN}/reference/combo_genome.{{sub}}.ht2",sub=range(1,9))
+        r1=f"{OUT}/fastp/{{sample_id}}_1.trim.fastq.gz",
+        r2=f"{OUT}/fastp/{{sample_id}}_2.trim.fastq.gz",
+        index_files=rules.build_ref_index.output
     output:
-        f"{OUT}/align/{{sample}}/{{id}}.SAM.gz"
+        f"{OUT}/align/{{sample_id}}.SAM.gz"
     params:
-        index_dir=f"{DATAIN}/reference/combo_genome",
-        outdir=f"{OUT}/align/{{sample}}",
-        outfile=f"{OUT}/align/{{sample}}/{{id}}.SAM"
+        index_dir=f"{DATAIN}/reference/combo_genome_{GENOME_BUILD}",
+        outdir=f"{OUT}/align",
     threads:
-        2
+        3
     shell:
         """
         mkdir -p {params.outdir}
-        
-        hisat2 -x {params.index_dir} -1 {input.r1} -2 {input.r2} -S {params.outfile}
-        
-        cd {params.outdir}
-        pigz -p {threads} {params.outfile}
+        hisat2 -x {params.index_dir} -p {threads} -1 {input.r1} -2 {input.r2} | pigz -p {threads} > {output}
         """
 rule align_sort:
     input:
-        sam_file=rules.align_reads.output
+        sam_file=f"{OUT}/align/{{sample_id}}.SAM.gz"
     output:
-         f"{OUT}/align/{{sample}}/{{id}}.bam"
+         f"{OUT}/align/{{sample_id}}.bam"
     shell:
         """
-        samtools sort -o {output[0]} {input.sam_file}
+        samtools sort -o {output} {input.sam_file}
         """
-rule align_index:
-    input:
-        bam_file=rules.align_sort.output
-    output:
-        f"{OUT}/align/{{sample}}/{{id}}.bam.bai"
-    shell:
-        """
-        samtools index -b {input.bam_file} {output[0]}
-        """
-
 rule qualimap_postalign:
     input:
-        bam_file = rules.align_sort.output
+        bam_file=f"{OUT}/align/{{sample_id}}.bam"
     output:
-        directory(f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimapReport")
+        directory(f"{OUT}/fastqc/postalign/{{sample_id}}_qualimapReport"),
     params:
-        tmpout = f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimap",
+        tmpout = f"{OUT}/fastqc/postalign/{{sample_id}}_qualimap",
         outdir = f"{OUT}/fastqc/postalign",
-        outfile_base = f"{{sample}}_{{id}}_qualimap",
-        finalhtml=f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimapReport.html",
-        rawdatadir = f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimap/raw_data_qualimapReport",
-        finalrawdata = f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimapReport",
-        rawgenome = f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimap/genome_results.txt",
-        finalgenome= f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_genome_results.txt"
+        outfile_base = f"{{sample_id}}_qualimap",
+        finalhtml=f"{OUT}/fastqc/postalign/{{sample_id}}_qualimapReport.html",
+        rawdatadir = f"{OUT}/fastqc/postalign/{{sample_id}}_qualimap/raw_data_qualimapReport",
+        finalrawdata = f"{OUT}/fastqc/postalign/{{sample_id}}_qualimapReport",
+        rawgenome = f"{OUT}/fastqc/postalign/{{sample_id}}_qualimap/genome_results.txt",
+        finalgenome= f"{OUT}/fastqc/postalign/{{sample_id}}_genome_results.txt"
     threads:
-        2
+        3
     shell:
         """
         mkdir -p {params.tmpout}
@@ -227,21 +265,174 @@ rule qualimap_postalign:
         
 rule multiqc:
     input: 
-        pretrim=f"{OUT}/fastqc/pretrim", 
-        posttrim=f"{OUT}/fastqc/posttrim", 
+        pretrim_files = expand(f"{OUT}/fastqc/pretrim/{{sample_id}}_{{read}}_fastqc.html", 
+                  sample_id=sample_id_pairs, read=[1,2]),
+        posttrim_files = expand(f"{OUT}/fastqc/posttrim/{{sample_id}}_{{read}}.trim_fastqc.html", 
+                      sample_id=sample_id_pairs, read=[1,2]),
         # Explicitly list all qualimap directories as dependencies
-        postalign_dirs = expand(f"{OUT}/fastqc/postalign/{{sample}}_{{id}}_qualimap", 
-                               zip, sample=SAMPLES, id=IDS) 
+        postalign_dirs = expand(f"{OUT}/fastqc/postalign/{{sample_id}}_qualimapReport", 
+                               sample_id=sample_id_pairs)
     output: 
         out=f"{OUT}/multiqc/final_multiqc_report.html"
     params: 
+        pretrim=f"{OUT}/fastqc/pretrim",
+        posttrim=f"{OUT}/fastqc/posttrim",
         outdir=f"{OUT}/multiqc",
         outhtml=f"{OUT}/multiqc/final_multiqc_report" 
     shell: 
         """
         mkdir -p {params.outdir}
         multiqc -n {params.outhtml} \
-        {input.pretrim} \
-        {input.posttrim} \
+        {params.pretrim} \
+        {params.posttrim} \
         {input.postalign_dirs}
+        """
+
+# Download appropriate GTF based on genome build
+rule download_human_gtf:
+    output:
+        f"{DATAIN}/reference/annotations_{GENOME_BUILD}.gtf"
+    params:
+        build=GENOME_BUILD
+    run:
+        if params.build == "grch37":
+            shell("""
+            wget -O {output}.gz http://ftp.ensembl.org/pub/grch37/release-87/gtf/homo_sapiens/Homo_sapiens.GRCh37.87.gtf.gz
+            gzip -d {output}.gz
+            """)
+        elif params.build == "grch38":
+            shell("""
+            wget -O {output}.gz http://ftp.ensembl.org/pub/release-110/gtf/homo_sapiens/Homo_sapiens.GRCh38.110.gtf.gz
+            gzip -d {output}.gz
+            """)
+        
+rule combine_gtf:
+    input:
+        human_gtf=rules.download_human_gtf.output,
+        herpes_gtf=config["herpes_gtf"]
+    output:
+        f"{DATAIN}/reference/combo_annotations_{GENOME_BUILD}.gtf"
+    shell:
+        """
+        cat {input.human_gtf} {input.herpes_gtf} > {output}
+        """
+        
+rule htseq_count:
+    input:
+        bam=f"{OUT}/align/{{sample_id}}.bam", 
+        gtf=rules.combine_gtf.output
+    output:
+        counts=f"{OUT}/htseq/{{sample_id}}_counts.txt",
+        summary=f"{OUT}/htseq/{{sample_id}}_counts_summary.txt"
+    params:
+        outdir=f"{OUT}/htseq",
+        stranded=config["stranded"],
+        feature_type=config["feature_type"],
+        id_attribute=config["id_attribute"]
+    threads: 3
+    shell:
+        """
+        mkdir -p {params.outdir}
+        
+        htseq-count \
+            --format=bam \
+            --order=pos \
+            --stranded={params.stranded} \
+            --minaqual=10 \
+            --type={params.feature_type} \
+            --idattr={params.id_attribute} \
+            --mode=union \
+            --nonunique=none \
+            {input.bam} {input.gtf} > {output.counts}
+        
+        # Extract summary statistics (last 5 lines of htseq output)
+        tail -n 5 {output.counts} > {output.summary}
+        
+        # Remove summary lines from main counts file
+        head -n -5 {output.counts} > {output.counts}.tmp
+        mv {output.counts}.tmp {output.counts}
+        """
+    
+rule combine_counts:
+    input:
+        counts=expand(f"{OUT}/htseq/{{sample_id}}_counts.txt", 
+                      sample_id=sample_id_pairs)
+    output:
+        matrix=f"{OUT}/htseq/combined_counts_matrix.txt",
+    run:
+        import pandas as pd
+        
+        # Read all count files and combine
+        count_data = {}
+        for i, count_file in enumerate(input.counts):
+            sample_id = f"{SAMPLES[i]}_{IDS[i]}"
+            df = pd.read_csv(count_file, sep='\t', header=None, 
+                           names=['gene_id', sample_id], index_col=0)
+            count_data[sample_id] = df[sample_id]
+        
+        # Combine into matrix
+        combined_df = pd.DataFrame(count_data).T
+        combined_df.index.name = "Run_Sample"
+        combined_df.sort_index(inplace=True)
+        combined_df.to_csv(output.matrix, sep='\t')
+       
+rule sample_metadata:
+    input:
+        f"{DATAIN}/sra_metadata.csv"
+    output:
+        samples=f"{OUT}/htseq/sample_metadata.txt"
+    run:
+        import pandas as pd
+        # read in SRA metadata
+        metadata = pd.read_csv(f"{DATAIN}/sra_metadata.csv")
+        
+        metadata['SampleId'] = metadata['Run'].map(SAMPLE_DICT)
+        metadata['Condition'] = metadata['SampleId'].map(SAMPLE_GROUP)
+        
+        # drop columns that have no values
+        metadata.dropna(how='all', axis = 1, inplace = True)
+        
+        # remove info for samples that may not exist
+        metadata = metadata[~metadata.Condition.isna()]
+        # create index column + sort index
+        metadata['Run_Sample'] = metadata['Run']+'_'+metadata['SampleId']
+        # set index values
+        metadata.set_index("Run_Sample", inplace=True)
+        metadata.sort_values("Run_Sample", inplace = True)
+        
+        metadata.to_csv(output.samples, sep='\t')
+        
+# PyDESeq2 differential expression analysis
+rule pydeseq2_analysis:
+    input:
+        counts=rules.combine_counts.output,
+        samples=rules.sample_metadata.output
+    output:
+        results=f"{OUT}/pydeseq2/differential_expression_results.csv",
+        normalized_counts=f"{OUT}/pydeseq2/normalized_counts.csv",
+        log2_counts=f"{OUT}/pydeseq2/log2_transformed_counts.csv",
+        pca_plot=f"{OUT}/pydeseq2/plots/pca_plot.pdf",
+        ma_plot=f"{OUT}/pydeseq2/plots/ma_plot.pdf",
+        volcano_plot=f"{OUT}/pydeseq2/plots/volcano_plot.pdf",
+        heatmap=f"{OUT}/pydeseq2/plots/heatmap_top_genes.pdf",
+        summary=f"{OUT}/pydeseq2/pydeseq2_summary.txt"
+    params:
+        outdir=f"{OUT}/pydeseq2",
+        plotdir=f"{OUT}/pydeseq2/plots",
+        padj_threshold=config.get("padj_threshold", 0.05), #set default vals in case info not in config
+        lfc_threshold=config.get("lfc_threshold", 1.0),
+        script=f"{IN}/analysis/run_pydeseq2.py"
+    threads: 4
+    shell:
+        """
+        mkdir -p {params.outdir}
+        mkdir -p {params.plotdir}
+        
+        python {params.script} \
+            --counts {input.counts} \
+            --samples {input.samples} \
+            --outdir {params.outdir} \
+            --padj {params.padj_threshold} \
+            --lfc {params.lfc_threshold} \
+            --threads {threads}
         """
