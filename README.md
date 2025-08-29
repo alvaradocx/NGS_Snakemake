@@ -1,5 +1,5 @@
 # NGS Snakemake Basic QC and Basic Analysis (In Progress)
-This is a basic snakemake pipeline for processing fastq data from [Herpes Simplex Virus 1 Infection of Human Brain Organoids and Pancreatic Stem Cell-Islets Drives Organoid-Specific Transcripts Associated with Alzheimer’s Disease and Autoimmune Diseases](https://pmc.ncbi.nlm.nih.gov/articles/PMC11640215/). Fastq samples can be downloaded from [GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE272361).
+This is a basic snakemake pipeline for processing fastq data from [Herpes Simplex Virus 1 Infection of Human Brain Organoids and Pancreatic Stem Cell-Islets Drives Organoid-Specific Transcripts Associated with Alzheimer’s Disease and Autoimmune Diseases](https://pmc.ncbi.nlm.nih.gov/articles/PMC11640215/). Fastq samples can be downloaded from [SRA Run Selector](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE272361](https://www.ncbi.nlm.nih.gov/Traces/study/?acc=PRJNA1136516&o=acc_s%3Aa)).
 ## Overview
 
 This pipeline performs RNA-seq analysis including:
