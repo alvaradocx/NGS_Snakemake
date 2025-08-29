@@ -122,5 +122,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contact
 
-Chelsea Alvarado
+Chelsea Alvarado <br>
 alvaradocx4@gmail.com
