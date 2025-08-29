@@ -30,6 +30,7 @@ conda activate rnaseq-pipeline
    - Genome build (grch37 or grch38)
    - Email for NCBI downloads
    - Sample information
+   - [Config Template](./snakemake/envs/config.yaml)
 
 2. **Required files (User Provided):**
    - Place FASTQ files in `{input_dir}/data/{sample_id}/`
