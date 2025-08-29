@@ -1,0 +1,36 @@
+name: snakemake-pipeline
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # Core workflow
+  - python=3.13
+  - snakemake=9.9.0
+  
+  # Bioinformatics tools
+  - fastqc=0.12.1
+  - fastp=1.0.1
+  - hisat2=2.2.1
+  - samtools=1.22.1
+  - multiqc=1.30
+  - qualimap=2.3
+  
+  # Data processing
+  - pandas=2.3.2
+  - numpy=2.2.6
+  - biopython=1.85
+  
+  # Compression/utilities
+  - pigz
+  - wget
+  - curl=8.14.1
+  
+  # R packages for potential compatibility
+  - r-base=4.4.3
+  
+  # Python packages via pip
+  - pip
+  - pip:
+    - htseq==2.0.9
+    - pydeseq2==0.5.2
+    - pysam==0.23.3
